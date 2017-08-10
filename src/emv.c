@@ -95,7 +95,7 @@ emv_tags_t emv_tags[] = {
 		{0x9f5c, "Cumulative Total Transaction Amount Upper Limit", BIN, 2},
 		{0x9f72, "Consecutive Transaction Limit (International - Country)", BIN, 2},
 		{0x9f65, "Track 2 Bit Map for CVC3", BIN, 2},
-		{0x9f66, "Track 2 Bit Map for UN and ATC", BIN, 2},
+		{0x9f66, "Terminal Transaction Qualifiers (TTQ)", BIN, 2},
 		{0x9f68, "Mag Stripe CVM List", BIN, 2},
 		{0x9f69, "Unpredictable Number Data Object List (UDOL)", BIN, 2},
 		{0x9f6b, "Track 2 Data", BIN, 2},

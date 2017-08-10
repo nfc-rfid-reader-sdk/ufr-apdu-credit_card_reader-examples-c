@@ -443,19 +443,27 @@ void tryEmvPseCardRead(const char *df_name, const char *szTitlePse) {
 				tail = tail->next;
 			}
 
-			printf("\n %d. Issuing \"GET PROCESSING OPTIONS\" command:\n"
-				   "  [C] 80 A8 00 00 02 83 00 00\n", cnt++);
-			status = ApduCommand("80 A8 00 00 02 83 00 00", &sz_hex_r_apdu, sw);
+			// Ovde se mora, ako postoji PDOL, sračunati dužinu bajtova i to poslati u narednoj komandi.
+			// Ako PDOL sadrži Terminal Capabilities Tag '9F33' onda po mnogima se mogu poslati sve nule.
+			// Ako PDOL sadrži Terminal Transaction Qualifiers (TTQ) Tag '9F66' onda tu treba postaviti bar "28 00 00 00"
+			//                 da ne bi kartica vratila grešku "69 85" = "Conditions of use not satisfied". Radi i sa
+            //                 "20 00 00 00".
+			// Posle ovoga pronaći Application File Locator (AFL) Tag '94' za dalje parsiranje - "sfi" & "record range".
+			// Ako ne postoji PDOL, Onda se šalje GPO komanda u formi: "80 A8 00 00 02 83 00 00" nakon koje se očekuje
+			// da kartica vrati Response Message Template Format 1 Tag '80' {Contains the data objects (without tags and lengths)
+			//        returned by the ICC in response to a command}. U tom slučaju prva dva bajta u okviru vraćene binarne vrednosti
+			//        Taga '80' predstavljaju AIP a ostatak AFL u grupama po 4 bajta koje treba parsirati isto kao Tag '94':
+			//        - prvi bajt je SFI šiftovan 3 bajta levo (za read record cmd samo treba još orovati sa 4)
+			//        - drugi bajt je prvi record tog SFI-a
+			//        - treći bajt je poslednji record tog SFI-a
+			//        - broj zapisa koji učestvuju u "offline data authentication" tog SFI-a počevši od prvog record-a.
+			printf("\n %d. Issuing \"Get processing options\" command:\n"
+				   "  [C] 80 A8 00 00 15 83 13 28 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n", cnt++);
+			status = ApduCommand("80 A8 00 00 15 83 13 28 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", &sz_hex_r_apdu, sw);
 			if (status != UFR_OK) {
 				printf(" Error while executing APDU command, uFR status is: 0x%08X\n", status);
 				break;
 			} else {
-				if (*sw16_ptr != 0x90) {
-					printf(" [SW] ");
-							print_hex_ln(sw, 2, " ");
-					printf(" Could not continue execution due to an APDU error.\n");
-//					break;
-				}
 				Ne = strlen(sz_hex_r_apdu) / 2;
 				if (Ne) {
 					printf(" APDU command executed: response data length = %d bytes\n", (int) Ne);
@@ -463,8 +471,15 @@ void tryEmvPseCardRead(const char *df_name, const char *szTitlePse) {
 				}
 				printf(" [SW] ");
 				print_hex_ln(sw, 2, " ");
+				if (*sw16_ptr != 0x90) {
+					printf(" Could not continue execution due to an APDU error.\n");
+				} else {
+					hex2bin(r_apdu, sz_hex_r_apdu);
+					emv_status = newEmvTag(&temp, r_apdu, Ne, false);
+					tail->next = temp;
+					tail = tail->next;
+				}
 			}
-			hex2bin(r_apdu, sz_hex_r_apdu);
 		}
 
 		printf("\n-------------------------------------------------------------------\n");
