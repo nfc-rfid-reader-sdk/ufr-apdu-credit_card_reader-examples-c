@@ -6,52 +6,21 @@
 #include <stdlib.h>
 #include <inttypes.h>
 #include <stdbool.h>
+#include <windows.h>
 #include <string.h>
 #include <uFCoder.h>
 #include "ini.h"
-#include "uFR.h"
+#include "utils.h"
 
 //------------------------------------------------------------------------------
-size_t hex2bin(uint8_t *dst, const char *src) {
-	size_t dst_len = 0;
-	char s_tmp[3];
-
-	s_tmp[2] = '\0';
-
-	while (*src) {
-		while (((char)*src < '0' || (char)*src > '9')
-				&& ((char)*src < 'a' || (char)*src > 'f')
-				&& ((char)*src < 'A' || (char)*src > 'F'))
-			src++; // skip delimiters, white spaces, etc.
-
-		s_tmp[0] = (char) *src++;
-
-		// Must be pair of the hex digits:
-		if (!(*src))
-			break;
-
-		// And again, must be pair of the hex digits:
-		if (((char)*src < '0' || (char)*src > '9')
-				&& ((char)*src < 'a' || (char)*src > 'f')
-				&& ((char)*src < 'A' || (char)*src > 'F'))
-			break;
-
-		s_tmp[1] = (char) *src++;
-
-		*dst++ = strtoul(s_tmp, NULL, 16);
-		dst_len++;
-	}
-
-	return dst_len;
-}
-//------------------------------------------------------------------------------
-UFR_STATUS ApduCommand(sz_ptr apdu, char **response, uint8_t *sw) {
+UFR_STATUS ApduCommand(const char *apdu, char **response, uint8_t *sw) {
 	UFR_STATUS status;
 
 	status = APDUHexStrTransceive(apdu, response);
 	if (status)
 		return status;
 
+//	printf("DEBUG >>> %d\n\n\n", (int)strlen(*response));
 	if (strlen(*response) % 2)
 		return UFR_PARAMETERS_ERROR;
 
@@ -73,6 +42,32 @@ bool CheckDependencies(void) {
 	UFR_STATUS status;
 
 #ifdef EXIT_ON_WRONG_LIB_DEPENDENCY
+	uint32_t dwDllVersion = 0;
+
+	dwDllVersion = GetDllVersion();
+
+	// "explode" the dll version:
+	version_major = LOBYTE(LOWORD(dwDllVersion));
+	version_minor = HIBYTE(LOWORD(dwDllVersion));
+
+	// Get the dll build number.
+	build = HIWORD(dwDllVersion);
+
+	if (version_major < MIN_DEPEND_LIB_VER_MAJOR) {
+		wrong_version = true;
+	} else if (version_major == MIN_DEPEND_LIB_VER_MAJOR && version_minor < MIN_DEPEND_LIB_VER_MINOR) {
+		wrong_version = true;
+	} else if (version_major == MIN_DEPEND_LIB_VER_MAJOR && version_minor == MIN_DEPEND_LIB_VER_MINOR && build < MIN_DEPEND_LIB_VER_BUILD) {
+		wrong_version = true;
+	}
+
+	if (wrong_version) {
+		printf("Wrong uFCoder library version (%d.%d.%d).\n"
+			   "Please update uFCoder library to at last %d.%d.%d version.\n",
+			   version_major, version_minor, build,
+			   MIN_DEPEND_LIB_VER_MAJOR, MIN_DEPEND_LIB_VER_MINOR, MIN_DEPEND_LIB_VER_BUILD);
+		return false;
+	}
 #endif
 #ifdef EXIT_ON_WRONG_FW_DEPENDENCY
 	wrong_version = false;
@@ -90,7 +85,7 @@ bool CheckDependencies(void) {
 		wrong_version = true;
 	} else if (version_major == MIN_DEPEND_FW_VER_MAJOR && version_minor < MIN_DEPEND_FW_VER_MINOR) {
 		wrong_version = true;
-	} else if (version_minor == MIN_DEPEND_FW_VER_MINOR && build < MIN_DEPEND_FW_VER_BUILD) {
+	} else if (version_major == MIN_DEPEND_FW_VER_MAJOR && version_minor == MIN_DEPEND_FW_VER_MINOR && build < MIN_DEPEND_FW_VER_BUILD) {
 		wrong_version = true;
 	}
 
@@ -104,7 +99,7 @@ bool CheckDependencies(void) {
 	return true;
 }
 //------------------------------------------------------------------------------
-sz_ptr GetDlTypeName(uint8_t dl_type_code) {
+const char *GetDlTypeName(uint8_t dl_type_code) {
 
 	switch (dl_type_code) {
 	case DL_MIFARE_ULTRALIGHT:

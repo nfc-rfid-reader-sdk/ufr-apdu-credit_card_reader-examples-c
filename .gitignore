@@ -4,3 +4,7 @@ language.settings.xml
 /win32_release/src/
 /win64_debug/src/
 /win64_release/src/
+/win64_release/
+/win32_debug/
+/win32_release/
+/win64_debug/
