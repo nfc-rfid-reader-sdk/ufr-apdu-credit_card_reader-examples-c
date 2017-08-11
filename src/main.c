@@ -200,16 +200,16 @@ UFR_STATUS NewCardInField(uint8_t sak, uint8_t *uid, uint8_t uid_size) {
 	return UFR_OK;
 }
 //------------------------------------------------------------------------------
-void checkEmvPse(const char *df_name, const char *szTitlePse) {
-	EMV_STATUS emv_status;
-	UFR_STATUS status;
-	emv_tree_node_t *head = NULL, *tail = NULL;
+void checkEmvPse(const char *df_name, const char *szTitlePse)
+{
+	emv_tree_node_t *head = NULL, *tail = NULL, *temp = NULL;
 	uint8_t r_apdu[RAW_RES_MAX_LEN];
 	uint32_t Ne; // without SW
 	uint8_t sw[2];
 	uint8_t sfi, record, cnt;
 	uint16_t *sw16_ptr = (uint16_t *) &sw;
-	emv_tree_node_t *temp = NULL;
+	EMV_STATUS emv_status;
+	UFR_STATUS status;
 
 	printf(" ===================================================================\n");
 	printf("  Checking if if the card support Payment System Environment (%s) \n", szTitlePse);
@@ -318,14 +318,17 @@ void tryEmvPseCardRead(const char *df_name, const char *szTitlePse) {
 	EMV_STATUS emv_status;
 	UFR_STATUS status;
 	bool head_attached = false;
-	emv_tree_node_t *head = NULL, *tail = NULL;
-	char *sz_hex_r_apdu;
+	emv_tree_node_t *head = NULL, *tail = NULL, *temp = NULL;
+	afl_list_item_t *afl_list = NULL, *afl_list_item = NULL;
+	uint8_t afl_list_count;
+//	char *sz_hex_r_apdu;
 	uint8_t r_apdu[RAW_RES_MAX_LEN];
 	uint32_t Ne; // without SW
 	uint8_t sw[2], aid[MAX_AID_LEN];
 	uint8_t sfi, record, cnt = 1, aid_len;
 	uint16_t *sw16_ptr = (uint16_t *) &sw;
-	emv_tree_node_t *temp = NULL;
+	uint8_t *gpo_data_field = NULL;
+	uint16_t gpo_data_field_size;
 
 	printf(" ===================================================================\n");
 	printf("            Read and parse EMV card supporting %s \n", szTitlePse);
@@ -340,10 +343,10 @@ void tryEmvPseCardRead(const char *df_name, const char *szTitlePse) {
 
 		printf(" %d. Issuing \"Select PSE\" command (\"%s\"):\n"
 			   "  [C] 00 A4 04 00 %02X ", cnt++, df_name, (unsigned)strlen(df_name));
-		print_hex((const uint8_t *)df_name, strlen(df_name), " ");
+		print_hex((uint8_t *)df_name, strlen(df_name), " ");
 		printf(" 00\n");
 		Ne = 256;
-		status = APDUTransceive(0x00, 0xA4, 0x04, 0x00, (const uint8_t *)df_name, strlen(df_name), r_apdu, &Ne, 1, sw);
+		status = APDUTransceive(0x00, 0xA4, 0x04, 0x00, (uint8_t *)df_name, strlen(df_name), r_apdu, &Ne, 1, sw);
 		if (status != UFR_OK) {
 			printf(" Error while executing APDU command, uFR status is: 0x%08X\n", status);
 			break;
@@ -407,14 +410,14 @@ void tryEmvPseCardRead(const char *df_name, const char *szTitlePse) {
 			} while (emv_status == EMV_OK);
 		}
 
-		emv_status = getAID(head, aid, &aid_len);
+		emv_status = getAid(head, aid, &aid_len);
 		if (emv_status == EMV_OK) {
 			printf("\n %d. Issuing \"Select the application\" command:\n"
 					   "  [C] 00 A4 04 00 %02X ", cnt++, aid_len);
-			print_hex((const uint8_t *)aid, aid_len, " ");
+			print_hex(aid, aid_len, " ");
 			printf(" 00\n");
 			Ne = 256;
-			status = APDUTransceive(0x00, 0xA4, 0x04, 0x00, (const uint8_t *)aid, aid_len, r_apdu, &Ne, 1, sw);
+			status = APDUTransceive(0x00, 0xA4, 0x04, 0x00, aid, aid_len, r_apdu, &Ne, 1, sw);
 			if (status != UFR_OK) {
 				printf(" Error while executing APDU command, uFR status is: 0x%08X\n", status);
 				break;
@@ -435,6 +438,11 @@ void tryEmvPseCardRead(const char *df_name, const char *szTitlePse) {
 			}
 
 			emv_status = newEmvTag(&temp, r_apdu, Ne, false);
+			if (emv_status) {
+				printf(" EMV parsing error code: 0x%08X", emv_status);
+				break;
+			}
+
 			if (!head_attached) {
 				head->next = tail = temp;
 				head_attached = true;
@@ -444,7 +452,7 @@ void tryEmvPseCardRead(const char *df_name, const char *szTitlePse) {
 			}
 
 			// Ovde se mora, ako postoji PDOL, sračunati dužinu bajtova i to poslati u narednoj komandi.
-			// Ako PDOL sadrži Terminal Capabilities Tag '9F33' onda po mnogima se mogu poslati sve nule.
+			// Ako PDOL sadrži Terminal Capabilities Tag '9F33' onda se po mnogima mogu poslati sve nule.
 			// Ako PDOL sadrži Terminal Transaction Qualifiers (TTQ) Tag '9F66' onda tu treba postaviti bar "28 00 00 00"
 			//                 da ne bi kartica vratila grešku "69 85" = "Conditions of use not satisfied". Radi i sa
             //                 "20 00 00 00".
@@ -453,13 +461,45 @@ void tryEmvPseCardRead(const char *df_name, const char *szTitlePse) {
 			// da kartica vrati Response Message Template Format 1 Tag '80' {Contains the data objects (without tags and lengths)
 			//        returned by the ICC in response to a command}. U tom slučaju prva dva bajta u okviru vraćene binarne vrednosti
 			//        Taga '80' predstavljaju AIP a ostatak AFL u grupama po 4 bajta koje treba parsirati isto kao Tag '94':
-			//        - prvi bajt je SFI šiftovan 3 bajta levo (za read record cmd samo treba još orovati sa 4)
+			//        - prvi bajt je SFI šiftovan 3 bita levo (za read record cmd samo treba još orovati sa 4)
 			//        - drugi bajt je prvi record tog SFI-a
 			//        - treći bajt je poslednji record tog SFI-a
 			//        - broj zapisa koji učestvuju u "offline data authentication" tog SFI-a počevši od prvog record-a.
+			// Ako kartica ne vrati Tag '80' onda treba očekivati da vrati tagove '82' za AIP i '94' za AFL.
+
+			printf("\n %d. Formating GET PROCESSING OPTIONS instruction (checking PDOL).\n", cnt++);
+			emv_status = formatGetProcessingOptionsDataField(temp, &gpo_data_field, &gpo_data_field_size);
+			if (emv_status) {
+				printf(" EMV parsing error code: 0x%08X", emv_status);
+				break;
+			}
+
 			printf("\n %d. Issuing \"Get processing options\" command:\n"
-				   "  [C] 80 A8 00 00 15 83 13 28 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n", cnt++);
-			status = ApduCommand("80 A8 00 00 15 83 13 28 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", &sz_hex_r_apdu, sw);
+				   "  [C] 80 A8 00 00 %02X ", cnt++, gpo_data_field_size);
+			print_hex(gpo_data_field, gpo_data_field_size, " ");
+			printf(" 00\n");
+			Ne = 256;
+			status = APDUTransceive(0x80, 0xA8, 0x00, 0x00, gpo_data_field, gpo_data_field_size, r_apdu, &Ne, 1, sw);
+			if (status != UFR_OK) {
+				printf(" Error while executing APDU command, uFR status is: 0x%08X\n", status);
+				break;
+			} else {
+				if (*sw16_ptr != 0x90) {
+					printf(" [SW] ");
+					print_hex_ln(sw, 2, " ");
+					printf(" Could not continue execution due to an APDU error.\n");
+					break;
+				}
+				if (Ne) {
+					printf(" APDU command executed: response data length = %d bytes\n", (int) Ne);
+					printf("  [R] ");
+					print_hex_ln(r_apdu, Ne, " ");
+				}
+				printf(" [SW] ");
+				print_hex_ln(sw, 2, " ");
+			}
+
+/*			status = ApduCommand("80 A8 00 00 15 83 13 28 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", &sz_hex_r_apdu, sw);
 			if (status != UFR_OK) {
 				printf(" Error while executing APDU command, uFR status is: 0x%08X\n", status);
 				break;
@@ -476,19 +516,76 @@ void tryEmvPseCardRead(const char *df_name, const char *szTitlePse) {
 				} else {
 					hex2bin(r_apdu, sz_hex_r_apdu);
 					emv_status = newEmvTag(&temp, r_apdu, Ne, false);
+					...CHECK status...
 					tail->next = temp;
 					tail = tail->next;
 				}
 			}
+*/
+			emv_status = newEmvTag(&temp, r_apdu, Ne, false);
+			if (emv_status) {
+				printf(" EMV parsing error code: 0x%08X", emv_status);
+				break;
+			}
+			tail->next = temp;
+			tail = tail->next;
+
+			emv_status = getAfl(temp, &afl_list, &afl_list_count);
+			if (emv_status == EMV_ERR_TAG_NOT_FOUND)
+				emv_status = getAflFromResponseMessageTemplateFormat1(temp, &afl_list, &afl_list_count);
+			if (emv_status) {
+				printf(" EMV parsing error code: 0x%08X", emv_status);
+				break;
+			}
+
+			afl_list_item = afl_list;
+			while (afl_list_item) {
+				for (int r = afl_list_item->record_first; r <= afl_list_item->record_last; r++) {
+					printf("\n %d. Issuing \"Read Record\" command (record = %d, sfi = %d):\n"
+								   "  [C] 00 B2 %02X %02X 00\n", cnt,
+								   r, afl_list_item->sfi, r, (afl_list_item->sfi << 3) | 4);
+
+					emv_status = emvReadRecord(r_apdu, &Ne, afl_list_item->sfi, r, sw);
+					if (emv_status == EMV_OK) {
+						emv_status = newEmvTag(&temp, r_apdu, Ne, false);
+						if (emv_status == EMV_OK) {
+							tail->next = temp;
+							tail = tail->next;
+						}
+						if (Ne) {
+							printf(" APDU command executed: response data length = %d bytes\n", (int) Ne);
+							printf("  [R] ");
+							print_hex_ln(r_apdu, Ne, " ");
+						}
+						printf(" [SW] ");
+						print_hex_ln(sw, 2, " ");
+					} else {
+						if (*sw16_ptr != 0x90) {
+							printf(" [SW] ");
+							print_hex_ln(sw, 2, " ");
+						}
+					}
+					cnt++;
+				}
+				afl_list_item = afl_list_item->next;
+			}
+//			if (outer_exit)
+//				break;
+
 		}
-
 		printf("\n-------------------------------------------------------------------\n");
-		printEmvBranch(head, 0);
-
 	} while (0);
 
+	printEmvBranch(head, 0);
+
 	printf(" ===================================================================\n");
-	emvTreeCleanup(head);
+
+	if (afl_list)
+		emvAflListCleanup(afl_list);
+	if (gpo_data_field)
+		free(gpo_data_field);
+	if (head)
+		emvTreeCleanup(head);
 
 	s_block_deselect(100);
 }
