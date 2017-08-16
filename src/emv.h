@@ -40,9 +40,11 @@ typedef enum E_EMV_STATUS {
 	EMV_ERR_MAX_TAG_LEN_BYTES_EXCEEDED,
 	EMV_ERR_TAG_NOT_FOUND,
 	EMV_ERR_TAG_WRONG_SIZE,
+	EMV_ERR_TAG_WRONG_TYPE,
 	EMV_ERR_IN_CARD_READER,
 	EMV_ERR_READING_RECORD,
-	EMV_ERR_PDOL_IS_EMPTY
+	EMV_ERR_PDOL_IS_EMPTY,
+	EMV_ERR_LIST_FORMAT_NOT_FOUND
 } EMV_STATUS;
 //==============================================================================
 typedef uint32_t emv_tag_t;
@@ -81,6 +83,8 @@ struct afl_list_item_s {
 // Public function prototypes:
 EMV_STATUS getSfi(emv_tree_node_t *tag_node, uint8_t *sfi);
 EMV_STATUS getAid(emv_tree_node_t *tag_node, uint8_t *aid, uint8_t *aid_len);
+EMV_STATUS getLogEntry(emv_tree_node_t *tag_node, uint8_t *sfi, uint8_t *log_records);
+EMV_STATUS getListLength(emv_tree_node_t *tag_node, uint16_t *length);
 EMV_STATUS getAfl(emv_tree_node_t *tag_node, afl_list_item_t **afl_list_item, uint8_t *afl_list_count);
 EMV_STATUS getAflFromResponseMessageTemplateFormat1(emv_tree_node_t *tag_node, afl_list_item_t **afl_list_item, uint8_t *afl_list_count);
 EMV_STATUS getPdol(emv_tree_node_t *tag_node, emv_tree_node_t **pdol);
@@ -91,6 +95,14 @@ void printEmvBranch(emv_tree_node_t *tag_node, int tabulator);
 EMV_STATUS newEmvTag(emv_tree_node_t **head, uint8_t *input, int32_t input_bytes_left, bool is_list_format);
 void emvTreeCleanup(emv_tree_node_t *head);
 void emvAflListCleanup(afl_list_item_t *head);
+//------------------------------------------------------------------------------
+bool isExistATCounter(emv_tree_node_t *log_list_item_format, uint16_t *pos, uint16_t *len);
+bool isExistTransactionDate(emv_tree_node_t *log_list_item_format, uint16_t *pos, uint16_t *len);
+bool isExistTransactionTime(emv_tree_node_t *log_list_item_format, uint16_t *pos, uint16_t *len);
+bool isExistAmountAuthorised(emv_tree_node_t *log_list_item_format, uint16_t *pos, uint16_t *len);
+bool isExistTransactionCurrency(emv_tree_node_t *log_list_item_format, uint16_t *pos, uint16_t *len);
+bool isExistTerminalCountry(emv_tree_node_t *log_list_item_format, uint16_t *pos, uint16_t *len);
+//------------------------------------------------------------------------------
 
 // emvReadRecord()
 // uint8_t *r_apdu - minimum of the 256 bytes have to be allocated before call

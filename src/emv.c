@@ -94,6 +94,7 @@ emv_tags_t emv_tags[] = {
 		{0x9f59, "Upper Consecutive Offline Limit (Card Check)", BIN, 2},
 		{0x9f5c, "Cumulative Total Transaction Amount Upper Limit", BIN, 2},
 		{0x9f72, "Consecutive Transaction Limit (International - Country)", BIN, 2},
+		{0x9f7c, "Merchant Custom Data", BIN, 2},
 		{0x9F62, "PCVC3 (Track1)", BIN, 2},
 		{0x9F63, "PUNATC (Track1)", BIN, 2},
 		{0x9F64, "NATC (Track1)", BIN, 2},
@@ -177,6 +178,8 @@ void print_tab(int tabulator);
 void printEmvNode(emv_tree_node_t *tag_node, int tabulator);
 EMV_STATUS newAflListItem(afl_list_item_t **afl_list);
 EMV_STATUS parseEmvTag(uint8_t *tag_ptr, emv_tag_t *tag, uint8_t **tag_val, int32_t *tag_len, int32_t *tag_len_len, int32_t *tag_val_len);
+EMV_STATUS getAid__(emv_tree_node_t *tag_node, uint8_t *aid, uint8_t *aid_len);
+EMV_STATUS getLogEntry__(emv_tree_node_t *tag_node, uint8_t *sfi, uint8_t *log_records);
 //==============================================================================
 emv_tag_index_t findEmvTagIndex(emv_tag_t tag)
 {
@@ -362,7 +365,7 @@ EMV_STATUS getSfi(emv_tree_node_t *tag_node, uint8_t *sfi) {
 	}
 }
 //------------------------------------------------------------------------------
-EMV_STATUS getAidHoriz(emv_tree_node_t *tag_node, uint8_t *aid, uint8_t *aid_len)
+EMV_STATUS getAid__(emv_tree_node_t *tag_node, uint8_t *aid, uint8_t *aid_len)
 {
 	if (!tag_node)
 		return EMV_ERR_TAG_NOT_FOUND;
@@ -377,9 +380,9 @@ EMV_STATUS getAidHoriz(emv_tree_node_t *tag_node, uint8_t *aid, uint8_t *aid_len
 		}
 	} else {
 		if (tag_node->subnode) {
-			return getAid(tag_node->subnode, aid, aid_len);
+			return getAid__(tag_node->subnode, aid, aid_len);
 		} else {
-			return getAid(tag_node->next, aid, aid_len);
+			return getAid__(tag_node->next, aid, aid_len);
 		}
 	}
 }
@@ -388,7 +391,42 @@ EMV_STATUS getAid(emv_tree_node_t *tag_node, uint8_t *aid, uint8_t *aid_len)
 	EMV_STATUS status;
 
 	while(tag_node) {
-		status = getAidHoriz(tag_node, aid, aid_len);
+		status = getAid__(tag_node, aid, aid_len);
+		if (status == EMV_OK) {
+			return EMV_OK;
+		}
+		tag_node = tag_node->next;
+	}
+	return EMV_ERR_TAG_NOT_FOUND;
+}
+//------------------------------------------------------------------------------
+EMV_STATUS getLogEntry__(emv_tree_node_t *tag_node, uint8_t *sfi, uint8_t *log_records)
+{
+	if (!tag_node)
+		return EMV_ERR_TAG_NOT_FOUND;
+
+	if (tag_node->tag == 0x9F4D) {
+		if (tag_node->value_len == 2) {
+			*sfi = (uint8_t)(tag_node->value)[0];
+			*log_records = (uint8_t)(tag_node->value)[1];
+			return EMV_OK;
+		} else {
+			return EMV_ERR_TAG_WRONG_SIZE;
+		}
+	} else {
+		if (tag_node->subnode) {
+			return getLogEntry__(tag_node->subnode, sfi, log_records);
+		} else {
+			return getLogEntry__(tag_node->next, sfi, log_records);
+		}
+	}
+}
+EMV_STATUS getLogEntry(emv_tree_node_t *tag_node, uint8_t *sfi, uint8_t *log_records)
+{
+	EMV_STATUS status;
+
+	while(tag_node) {
+		status = getLogEntry__(tag_node, sfi, log_records);
 		if (status == EMV_OK) {
 			return EMV_OK;
 		}
@@ -424,6 +462,28 @@ void emvAflListCleanup(afl_list_item_t *head) {
 		free(head);
 		head = temp;
 	}
+}
+//------------------------------------------------------------------------------
+EMV_STATUS getListLength(emv_tree_node_t *tag_node, uint16_t *length)
+{
+	emv_tree_node_t *p;
+
+	*length = 0;
+
+	if (!tag_node)
+		return EMV_ERR_TAG_NOT_FOUND;
+	if (tag_node->tag_type != TL_LIST)
+		return EMV_ERR_TAG_WRONG_TYPE;
+	if (!tag_node->tl_list_format)
+		return EMV_ERR_LIST_FORMAT_NOT_FOUND;
+
+	p = tag_node->tl_list_format;
+	while (p)
+	{
+		*length += p->value_len;
+		p = p->next;
+	}
+	return EMV_OK;
 }
 //------------------------------------------------------------------------------
 EMV_STATUS getAfl(emv_tree_node_t *tag_node, afl_list_item_t **afl_list_item, uint8_t *afl_list_count)
@@ -605,7 +665,22 @@ EMV_STATUS formatGetProcessingOptionsDataField(emv_tree_node_t *tag_node, uint8_
 			if (p->tag == 0x9F66) // Terminal Transaction Qualifiers (TTQ) Tag
 			{
 				temp[0] = 0x28;
+//				temp[1] = 0x20;
+//				temp[2] = 0xC0;
+//				temp[3] = 0x00;
 			}
+			else if (p->tag == 0x5F2A) //
+			{
+				temp[0] = 0x09;
+				temp[1] = 0x41;
+			}
+			else if (p->tag == 0x9A03)
+			{
+				temp[0] = 0x17;
+				temp[1] = 0x08;
+				temp[2] = 0x15;
+			}
+
 			temp += p->value_len;
 			p = p->next;
 		}
@@ -778,5 +853,89 @@ EMV_STATUS emvReadRecord(uint8_t *r_apdu, uint32_t *Ne, uint8_t sfi, uint8_t rec
 		return EMV_ERR_READING_RECORD;
 
 	return EMV_OK;
+}
+//------------------------------------------------------------------------------
+bool isExistATCounter(emv_tree_node_t *log_list_item_format, uint16_t *pos, uint16_t *len)
+{
+	*pos = 0;
+	while (log_list_item_format) {
+		if (log_list_item_format->tag == 0x9f36) {
+			*len = log_list_item_format->value_len;
+			return true;
+		}
+		*pos += log_list_item_format->value_len;
+		log_list_item_format = log_list_item_format->next;
+	}
+	return false;
+}
+//------------------------------------------------------------------------------
+bool isExistTransactionDate(emv_tree_node_t *log_list_item_format, uint16_t *pos, uint16_t *len)
+{
+	*pos = 0;
+	while (log_list_item_format) {
+		if (log_list_item_format->tag == 0x9a) {
+			*len = log_list_item_format->value_len;
+			return true;
+		}
+		*pos += log_list_item_format->value_len;
+		log_list_item_format = log_list_item_format->next;
+	}
+	return false;
+}
+//------------------------------------------------------------------------------
+bool isExistTransactionTime(emv_tree_node_t *log_list_item_format, uint16_t *pos, uint16_t *len)
+{
+	*pos = 0;
+	while (log_list_item_format) {
+		if (log_list_item_format->tag == 0x9f21) {
+			*len = log_list_item_format->value_len;
+			return true;
+		}
+		*pos += log_list_item_format->value_len;
+		log_list_item_format = log_list_item_format->next;
+	}
+	return false;
+}
+//------------------------------------------------------------------------------
+bool isExistAmountAuthorised(emv_tree_node_t *log_list_item_format, uint16_t *pos, uint16_t *len)
+{
+	*pos = 0;
+	while (log_list_item_format) {
+		if (log_list_item_format->tag == 0x9f02) {
+			*len = log_list_item_format->value_len;
+			return true;
+		}
+		*pos += log_list_item_format->value_len;
+		log_list_item_format = log_list_item_format->next;
+	}
+	return false;
+}
+//------------------------------------------------------------------------------
+bool isExistTransactionCurrency(emv_tree_node_t *log_list_item_format, uint16_t *pos, uint16_t *len)
+{
+	*pos = 0;
+	while (log_list_item_format) {
+		if (log_list_item_format->tag == 0x5f2a) {
+			*len = log_list_item_format->value_len;
+			return true;
+		}
+		*pos += log_list_item_format->value_len;
+		log_list_item_format = log_list_item_format->next;
+	}
+	return false;
+}
+//------------------------------------------------------------------------------
+bool isExistTerminalCountry(emv_tree_node_t *log_list_item_format, uint16_t *pos, uint16_t *len)
+{
+	*pos = 0;
+	while (log_list_item_format) {
+		if (log_list_item_format->tag == 0x9f1a) {
+			*len = log_list_item_format->value_len;
+			return true;
+		}
+		*pos += log_list_item_format->value_len;
+		log_list_item_format = log_list_item_format->next;
+	}
+	return false;
 }
 //------------------------------------------------------------------------------

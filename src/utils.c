@@ -51,6 +51,18 @@ int bin_bcd_to_i(const uint8_t *bin, uint32_t len) {
 	return result;
 }
 //------------------------------------------------------------------------------
+uint64_t bin_bcd_to_ll(const uint8_t *bin, uint32_t len) {
+	uint64_t result = 0, dec = 1;
+
+	for (int i = len; i > 0; i--) {
+		result += (bin[i - 1] & 0x0F) * dec;
+		dec *= 10;
+		result += (bin[i - 1] >> 4) * dec;
+		dec *= 10;
+	}
+	return result;
+}
+//------------------------------------------------------------------------------
 bool isByteArrayPrintable(const uint8_t *arr, uint32_t len) {
 
 	for (int i = 0; i < len; i++) {

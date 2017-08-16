@@ -14,6 +14,7 @@ void print_ln(char symbol);
 void print_hex(const uint8_t *data, uint32_t len, const char *delimiter);
 void print_hex_ln(const uint8_t *data, uint32_t len, const char *delimiter);
 int bin_bcd_to_i(const uint8_t *bin, uint32_t len);
+uint64_t bin_bcd_to_ll(const uint8_t *bin, uint32_t len);
 bool isByteArrayPrintable(const uint8_t *s, uint32_t len);
 size_t hex2bin(uint8_t *dst, const char *src);
 
