@@ -5,7 +5,7 @@
 #ifndef INI_H_
 #define INI_H_
 
-#define APP_VERSION				"0.1"
+#define APP_VERSION				"0.2"
 
 #define EXIT_ON_WRONG_FW_DEPENDENCY
 #define MIN_DEPEND_FW_VER_MAJOR		3
