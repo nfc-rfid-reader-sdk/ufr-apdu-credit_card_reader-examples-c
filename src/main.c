@@ -185,7 +185,7 @@ void usage(void) {
 	default:
 		printf(" +------------------------------------------------+\n"
 				" |         APDU usage with uFR example            |\n"
-				" |                 version "APP_VERSION"                    |\n"
+				" |                 version " APP_VERSION "                    |\n"
 				" +------------------------------------------------+\n");
 		printf(" When You put ISO14443-4 tag in the reader field,\n"
 				" You will be prompted for appropriate scenario.\n"
